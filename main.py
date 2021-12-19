@@ -1,6 +1,7 @@
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 from pathlib import Path
 import os
+# from pprint import pprint
 
 # find all files is dir and it's subdirectories ending in .ext
 # dir = folder path as a string: "\path\to\dir"
@@ -13,6 +14,15 @@ def findFiles(dir, ext):
                 found.append(os.path.join(path, name))
     return found
 
+# write a list to a file
+# file = file object from open()
+# list = any python list
+def writeList(file, list):
+    for i in list:
+        file.write(f'{i}\n')
+    return
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Start ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 if __name__ == '__main__':
     # parse command line arguments
     parser = ArgumentParser(description='find moving objects of interest in .mp4 files using YOLOv4',
@@ -24,6 +34,7 @@ if __name__ == '__main__':
 
     # find all mp4 files
     mp4s = findFiles(args.input, '.mp4')
-    print(mp4s)
-
-
+    # pprint(mp4s)
+    # add all mp4s to working.txt file to keep track of which files have already been looked at
+    working_file = open('working.txt', 'a')
+    writeList(working_file, mp4s)
