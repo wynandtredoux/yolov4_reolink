@@ -115,5 +115,8 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+#
 working.txt
 ffmpeg_errors.txt
+darknet/
