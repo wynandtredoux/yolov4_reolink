@@ -1,3 +1,4 @@
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Includes ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 from pathlib import Path
 import os
@@ -6,15 +7,14 @@ import sys
 import time
 import datetime
 
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Functions ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-# from pprint import pprint
-
-# find all files is dir and it's subdirectories ending in .ext
+# find all files in dir and its subdirectories ending in 'ext'
 # dir = folder path as a string: "\path\to\dir"
 # ext = file extension as a string (including the dot): ".mp4"
 # exclude = a list of files (in the same format as 'found') to exclude
 # returns list of files as 'found'
-def findFiles(dir, ext, exclude=[]):
+def findFiles(dir, ext, exclude=None):
     found = []
     for path, subdirs, files in os.walk(dir):  # walk through all files
         for name in files:
@@ -52,6 +52,7 @@ if __name__ == '__main__':
     # parse command line arguments
     parser = ArgumentParser(description='find moving objects of interest in .mp4 files using YOLOv4'
                             , formatter_class=ArgumentDefaultsHelpFormatter)
+    parser.add_argument('darknet_location', help='path for the darknet executable')
     parser.add_argument('-i', '--input', nargs='?', default='./', type=Path,
                         help='parent directory of video files')
     args = parser.parse_args()
@@ -86,4 +87,4 @@ if __name__ == '__main__':
         with open(wf_name, 'a') as file:
             file.write(f'{i}\n')
 
-    
+    # send converted files to darknet YOLOv4
