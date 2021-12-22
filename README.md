@@ -12,7 +12,7 @@ There are far too many false positives for the email notifications to be useful.
 
 The Solution:
 
-The NVR has the functionality to send the video files over FTP to a server instead of in an email. I want this program to be able to find all video files in a folder, determine if it is a false positive (no *moving* people, animals, or vehicles found by YOLO), and then only the true positives get send as email notifications.
+The NVR has the functionality to send the video clips over FTP to a server when it detects motion instead of in an email. I want this program to be able to find all video files in a folder, determine if it is a false positive (no *moving* people, animals, or vehicles found by YOLO), and then only the true positives get send as email notifications.
 
 Issues I encountered so far:
 
