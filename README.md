@@ -18,6 +18,11 @@ Issues I encountered so far:
 
 you need to compile darknet yolov4 with CUDA enabled. Go through https://github.com/AlexeyAB/darknet/ and test to make sure that the darknet executable is working. This can be a very long process.
 
-CUDA_PATH environment variable needs to be set.
+CUDA_PATH environment variable needs to be set in Windows
 
-Finding a good threshold value for YOLO's detection confidance that works both in daytime and nighttime. Right now, around 55%-65% seems to be a good spot.
+My Windows machine has seen a good number of hard crashes and CUDA errors while running this script. I think this may be a combination of things such as:
+ - The darknet implementation being written primarily for linux
+ - My Windows PC is using the same GPU for it's display outputs, windows desktop UI, and CUDA accelerated tasks
+So far yolov4 has been stable on my headless linux machine (where I intend to deploy this program) so I'm not going to worry about tracking down issues specific to Windows
+
+Finding a good threshold value for YOLO's detection confidence that works both in daytime and nighttime. Right now, around 55%-65% seems to be a good spot.
