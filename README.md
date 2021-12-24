@@ -24,6 +24,6 @@ My Windows machine has seen a good number of hard crashes and CUDA errors while 
  - The darknet implementation being written primarily for linux
  - My Windows PC is using the same GPU for it's display outputs, windows desktop UI, and CUDA accelerated tasks
 
-   So far yolov4 has been stable on my headless linux machine (where I intend to deploy this program) so I'm not going to worry about tracking down issues specific to Windows
+   So far yolov4 has been stable on my headless linux machine (where I intend to deploy this program, and where neither of these issue apply) so I'm not going to worry about tracking down issues specific to Windows
 
 Finding a good threshold value for YOLO's detection confidence that works both in daytime and nighttime. Right now, around 55%-65% seems to be a good spot.
