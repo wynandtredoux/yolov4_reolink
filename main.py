@@ -448,11 +448,11 @@ if __name__ == '__main__':
         for j in threads:
             j.join()
         # delete .lowfps file after detection is complete
-        if Path(i).exists(): # check that the file still exists
+        if Path(i).exists():  # check that the file still exists
             try:
                 os.remove(i)
-            except:
-                raise Exception(f'Could not delete {i}. Check file permissions')
+            except:  # just send warning if delete fails instead of stopping the program
+                warn(f'Could not delete {i}. Check file permissions')
 
         # define array to keep track of motion in each object group
         group_motion = np.zeros(shape=(len(group_names), 1), dtype=bool)
