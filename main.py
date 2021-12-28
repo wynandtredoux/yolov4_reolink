@@ -1,16 +1,20 @@
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Includes ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+import numpy as np
+import math
 from argparse import ArgumentParser
 from pathlib import Path
 import os
 import sys
+from warnings import warn
 import time
 import psutil
 import cv2
 import ffmpeg
 import datetime
-from threading import Thread, enumerate
+from threading import Thread
 from queue import Queue, Full
 import random
+from sklearn.cluster import DBSCAN
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ My Functions ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -81,6 +85,66 @@ def readList(txt):
     return txt_list
 
 
+# get groups of objects of interest from text file
+# txt = name of text file: "path\to\file.txt"
+# returns object names in each group in group_elements, and each group name in groups_names
+def getOOI(txt):
+    group_elements = []
+    elements = []
+    groups_names = []
+    with open(txt, 'r') as file:
+        lines = file.read().splitlines()
+    for line in lines:
+        # if there is an empty line, a new group has started
+        if not line:
+            # add current list of elements to group_elements if not empty
+            if len(elements) > 0:
+                group_elements.append(elements)
+                elements = []  # reset elements list
+            continue  # go to next line
+        # if the line starts with '%', there is a new group name
+        if line[0] == '%':
+            groups_names.append(line[1:])
+            continue  # next line
+        # add new object name to elements list
+        elements.append(line)
+    # add last group of object names
+    group_elements.append(elements)
+    # check that each group has a name
+    if len(group_elements) > len(groups_names):
+        warn(f'group_elements (size {len(group_elements)}) is not the same length as groups_names (size {len(groups_names)}).\n'
+             f'missing group names will be set to their group IDs')
+        for i in range(len(groups_names), len(group_elements)):
+            groups_names.append(f'{i}')
+    return group_elements, groups_names
+
+
+# write python list to file:
+# file: file object
+# list: python list object
+def writeList(file, list):
+    for i in list:
+        file.write(f'{i}\n')
+    return
+
+
+# separate detections by group ID number
+# detections
+def detectionsToArray(detections, groupid):
+    # get all indices where the groupID matches
+    group_idx = [idx for idx in range(len(detections)) if detections[idx][3] == groupid]
+    n = len(group_idx) # number of detections found
+    # preallocate array = [x, y, width, height] from bounding box in detections
+    array = np.zeros(shape=(n, 4), dtype=int)
+    for i in range(0, n):
+        # get bounding box
+        bbox = detections[group_idx[i]][2]
+        # save bounding box coordinates and size in array
+        for j in range(0,4):
+            array[i, j] = bbox[j]
+    return array
+
+
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Modified darknet_video.py Functions ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def convert2relative(bbox):
     """
@@ -125,44 +189,77 @@ def video_capture(frame_queue, darknet_image_queue):
 
 def inference(darknet_image_queue, detections_queue, fps_queue):
     while cap.isOpened():
+        # get video frame
         darknet_image = darknet_image_queue.get()
         prev_time = time.time()
+        # detect objects in frame
         detections = darknet.detect_image(network, class_names, darknet_image, thresh=darknet_thresh)
+        # find if detection name is in objects_of_interest.txt
+        i = 0  # detections index
+        while i < len(detections):
+            # found = False
+            g = -1  # group number index
+            for k in range(0, len(OOI_groups)):
+                group = OOI_groups[k]
+                for j in range(0, len(group)):
+                    # if detection label is found in objects_of_interest.txt
+                    if detections[i][0] == group[j]:
+                        # append group number to detections[i]
+                        g = k
+                        detections[i] = detections[i] + (g,)
+            if g < 0:  # delete detection if not found in objects_of_interest.txt
+                del detections[i]
+                i -= 1
+            i += 1
         detections_queue.put(detections)
         process_fps = int(1/(time.time() - prev_time))
         try:
             fps_queue.put(process_fps, timeout=1)
         except Full:
             pass
-        #print(f'fps: {process_fps}')
         sys.stdout.write("fps: %d   \r" % (process_fps))
         sys.stdout.flush()
-        # darknet.print_detections(detections, False)
         darknet.free_image(darknet_image)
+        darknet_image_queue.task_done()
     print('\tinference done')
     cap.release()
 
+# modified from darknet.py
+# added bsize, fscale, fsize to change the bounding box thickness, font scale, and font line thickness
+def draw_boxes(detections, image, colors, bsize, fscale, fsize):
+    import cv2
+    for detection in detections:
+        label, confidence, bbox = detection[0:3]
+        left, top, right, bottom = darknet.bbox2points(bbox)
+        cv2.rectangle(image, (left, top), (right, bottom), colors[label], bsize)
+        cv2.putText(image, "{} [{:.2f}]".format(label, float(confidence)),
+                    (left, top - 5), cv2.FONT_HERSHEY_SIMPLEX, fscale,
+                    colors[label], fsize)
+    return image
 
-def drawing(frame_queue, detections_queue, fps_queue):
+
+def drawing(frame_queue, detections_queue, fps_queue, bsize, fscale, fsize):
     random.seed(3)  # deterministic bbox colors
     video = cv2.VideoWriter(output_video, cv2.VideoWriter_fourcc(*"mp4v"),
                             int(cap.get(cv2.CAP_PROP_FPS)), (video_width, video_height))
-
     while cap.isOpened():
         frame = frame_queue.get()
         detections = detections_queue.get()
-        fpsq = fps_queue.get()
+        fps_queue.get()  # this is just used to clear the fps queue
+        fps_queue.task_done()
         detections_adjusted = []
         if frame is not None:
-            for label, confidence, bbox in detections:
+            for detection in detections:
+                label, confidence, bbox, group_num = detection
                 bbox_adjusted = convert2original(frame, bbox)
-                detections_adjusted.append((str(label), confidence, bbox_adjusted))
-            image = darknet.draw_boxes(detections_adjusted, frame, class_colors)
+                tup = (str(label), confidence, bbox_adjusted, group_num)
+                detections_adjusted.append(tup)
+                all_detections.append(tup)
+            image = draw_boxes(detections_adjusted, frame, class_colors, bsize, fscale, fsize)
             video.write(image)
-        else:
-            break
+        frame_queue.task_done()
+        detections_queue.task_done()
     print('\tdrawing done')
-    # fps_queue.task_done()
     cap.release()
     video.release()
     cv2.destroyAllWindows()
@@ -170,13 +267,31 @@ def drawing(frame_queue, detections_queue, fps_queue):
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Start ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 if __name__ == '__main__':
-    # constants
+    # text files
     converted_name = 'converted.txt'  # text file that contains paths of video files that have been run through ffmpeg
     detected_name = 'detected.txt'  # text file that contains paths of video files that have been run through the detector
     ffmpeg_err_name = 'ffmpeg_errors.txt'  # text file that contains any errors encountered by ffmpeg
+    OOI_name = 'objects_of_interest.txt'  # text file containing groups of names of objects of interest
+    # ffmpeg options
     ext = '.mp4'  # extension of video files
     fps = 10  # framerate that video files should be reduced to
-    darknet_thresh = 0.4  # threshold for darknet detector
+    # darket options (file paths can be relative to darknet executable)
+    darknet_thresh = 0.55  # threshold for darknet detector
+    configPath = "./cfg/yolov4.cfg"  # Path to cfg
+    weightPath = "./yolov4.weights"  # Path to weights
+    dataPath = "./cfg/coco.data"  # Path to meta data
+    # DBSCAN options
+    dbscan_epsilon = 100  # clustering search radius
+    dbscan_minpoints = 3  # minimum number of points to cluster
+    # threshold standard deviation in pixels
+    # if the 2D (x,y) standard deviation of the points of a detected object
+    # is greater than or equal to std_thresh, the object is considered moving
+    std_thresh = 30
+
+    # bounding box and text size
+    box_thickness = 5
+    font_size = 2
+    font_thickness = 4
 
     # parse command line arguments
     parser = ArgumentParser(description=f'find moving objects of interest in {ext} files using YOLOv4')
@@ -208,7 +323,6 @@ if __name__ == '__main__':
             del mp4s[i]
             i -= 1
         i += 1
-    del i
 
     # pause all processes given by -p argument
     suspendPid(args.pid)
@@ -255,6 +369,9 @@ if __name__ == '__main__':
         resumePid(args.pid)  # resume processes before exit
         exit(0)
 
+    # read in names of objects of interest from OOI_name
+    OOI_groups, group_names = getOOI(OOI_name)
+
     # import darknet library from -d argument (this must be done *after* getting the path from the user)
     sys.path.insert(0, str(args.darknet_location))  # temporarily add darknet folder to path
     # if in windows, add some paths to dll search path
@@ -264,13 +381,8 @@ if __name__ == '__main__':
     import darknet
     darknet.set_gpu(args.gpu)  # specify which GPU darknet should use
 
-    # import functions from modified darknet_video file (this must be done after first importing darknet)
-    # from darknet_video_modified import video_capture, inference, drawing
+    # darknet
 
-    # darknet file paths (relative to darknet executable)
-    configPath = "./cfg/yolov4.cfg"  # Path to cfg
-    weightPath = "./yolov4.weights"  # Path to weights
-    dataPath = "./cfg/coco.data"  # Path to meta data
 
     # navigate to darknet directory (darknet's default configuration uses paths relative to the executable)
     pwd = os.getcwd()
@@ -291,6 +403,7 @@ if __name__ == '__main__':
         darknet_image_queue = Queue(maxsize=1)
         detections_queue = Queue()
         fps_queue = Queue(maxsize=5)
+        all_detections = []
 
         # get network dimensions
         darknet_width = darknet.network_width(network)
@@ -306,7 +419,7 @@ if __name__ == '__main__':
         threads.append(t)
         t = Thread(target=inference, args=(darknet_image_queue, detections_queue, fps_queue))
         threads.append(t)
-        t = Thread(target=drawing, args=(frame_queue, detections_queue, fps_queue))
+        t = Thread(target=drawing, args=(frame_queue, detections_queue, fps_queue, box_thickness, font_size, font_thickness))
         threads.append(t)
         t_start = time.time()
         # start all threads
@@ -316,10 +429,64 @@ if __name__ == '__main__':
         for j in threads:
             j.join()
 
+        # define array to keep track of motion in each object group
+        group_motion = np.zeros(shape=(len(group_names), 1), dtype=bool)
+        # for each object group defined in OOI_name
+        for group_name, groupid in zip(group_names, range(len(group_names))):
+            # get bounding box coordinates of all detections from the current group
+            bboxes = detectionsToArray(all_detections, groupid)
+            print(f'\t{bboxes.shape[0]} detections found for group {group_name}')
+            # if there are no detections for current group, skip
+            if bboxes.shape[0] == 0:
+                continue
+
+            # preform DBSCAN clustering on bounding box coordinates in group
+            # eps = search radius
+            # min_samples = minimum number of points
+            clusters = DBSCAN(eps=dbscan_epsilon, min_samples=dbscan_minpoints).fit(bboxes[:, 0:2])
+            cluster_ids = set(clusters.labels_)
+            # for each cluster
+            for id in cluster_ids:
+                # ignore outlier points
+                if id == -1:
+                    continue
+                # get points of the current cluster
+                cluster_points = bboxes[clusters.labels_ == id, 0:2]
+                print(f'\t\t{len(cluster_points)} cluster points found in cluster {id}')
+                # calculate standard deviations of the coordinates
+                std_x = np.std(cluster_points[:, 0])
+                std_y = np.std(cluster_points[:, 1])
+                std_xy = math.sqrt(std_x**2 + std_y**2)
+                print(f'\t\t\tstdx: {std_x}, stdy: {std_y}, std: {std_xy}')
+                if std_xy >= std_thresh:
+                    print(f'\t\t!!Detected a moving object of type {group_name}!!')
+                    group_motion[groupid] = True
+
+        # tmp = os.path.splitext(i)[0] + '_detect.txt'
+        # with open(tmp, 'w') as file:
+        #     for j in all_detections:
+        #         for k in j:
+        #             file.write(f'{k}\n')
+
         print(f'\tfinished {i} in {round(time.time() - t_start,1)}s')
         # after darknet is done detecting objects, add file path to detected_name so it doesn't get converted again
         with open(detected_name, 'a') as file:
             file.write(f'{i}\n')
+
+        # make new folders (if they don't already exist) in the video directory
+        vid_folder = Path(os.path.dirname(i))
+        true_path = Path(vid_folder) / 'true_positive'
+        false_path = Path(vid_folder) / 'false_positive'
+        if not true_path.exists():
+            os.mkdir(str(true_path))
+        if not false_path.exists():
+            os.mkdir(str(false_path))
+
+        # move .yolo file to the corresponding folder
+        if any(group_motion):
+            os.replace(output_video, str(true_path / os.path.basename(output_video)))
+        else:
+            os.replace(output_video, str(false_path / os.path.basename(output_video)))
 
     # resume suspended processes before exit
     resumePid(args.pid)

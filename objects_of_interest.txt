@@ -1,0 +1,17 @@
+%Person
+person
+
+%Vehicle
+bicycle
+car
+motorbike
+bus
+truck
+
+%Animal
+cat
+dog
+horse
+sheep
+cow
+bear
