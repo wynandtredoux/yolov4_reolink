@@ -145,6 +145,13 @@ def detectionsToArray(detections, groupid):
     return array
 
 
+# print to console only if verbose argument is true
+def printIf(msg, arg):
+    if arg:
+        print(msg)
+    return
+
+
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Modified darknet_video.py Functions ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def convert2relative(bbox):
     """
@@ -183,7 +190,7 @@ def video_capture(frame_queue, darknet_image_queue):
         img_for_detect = darknet.make_image(darknet_width, darknet_height, 3)
         darknet.copy_image_from_bytes(img_for_detect, frame_resized.tobytes())
         darknet_image_queue.put(img_for_detect)
-    print('\tvideo_capture done')
+    printIf('\tvideo_capture done', args.verbose)
     cap.release()
 
 
@@ -217,11 +224,12 @@ def inference(darknet_image_queue, detections_queue, fps_queue):
             fps_queue.put(process_fps, timeout=1)
         except Full:
             pass
-        sys.stdout.write("fps: %d   \r" % (process_fps))
-        sys.stdout.flush()
+        if args.verbose:
+            sys.stdout.write("fps: %d   \r" % (process_fps))
+            sys.stdout.flush()
         darknet.free_image(darknet_image)
         darknet_image_queue.task_done()
-    print('\tinference done')
+    printIf('\tinference done', args.verbose)
     cap.release()
 
 # modified from darknet.py
@@ -259,7 +267,7 @@ def drawing(frame_queue, detections_queue, fps_queue, bsize, fscale, fsize):
             video.write(image)
         frame_queue.task_done()
         detections_queue.task_done()
-    print('\tdrawing done')
+    printIf('\tdrawing done', args.verbose)
     cap.release()
     video.release()
     cv2.destroyAllWindows()
@@ -286,7 +294,7 @@ if __name__ == '__main__':
     # threshold standard deviation in pixels
     # if the 2D (x,y) standard deviation of the points of a detected object
     # is greater than or equal to std_thresh, the object is considered moving
-    std_thresh = 30
+    std_thresh = 60
 
     # bounding box and text size
     box_thickness = 5
@@ -304,13 +312,15 @@ if __name__ == '__main__':
     parser.add_argument('-p', '--pid', nargs='+', default=None, type=int,
                         help='specify the PID of 1 or more processes that should to be paused. '
                              'This may require elevated privileges.')
+    parser.add_argument('-v', '--verbose', action='store_true',
+                        help='outputs more information to the console during processing')
     args = parser.parse_args()
 
-    # print all args for debugging
-    print(f'Input file path: {args.input}')
-    print(f'GPU ID: {args.gpu}')
-    print(f'darknet folder: {args.darknet_location}')
-    print(f'PID(s): {args.pid}\n')
+    # print args
+    printIf(f'Input file path: {args.input}', args.verbose)
+    printIf(f'GPU ID: {args.gpu}', args.verbose)
+    printIf(f'darknet folder: {args.darknet_location}', args.verbose)
+    printIf(f'PID(s): {args.pid}\n', args.verbose)
 
     # get list of .mp4 files that have been converted already
     mp4s_converted = readList(converted_name)
@@ -329,7 +339,7 @@ if __name__ == '__main__':
 
     # convert video files with ffmpeg to reduce framerate (uses NVENC for fast encoding)
     for i in mp4s:
-        print(f'converting {i} with ffmpeg...')
+        printIf(f'converting {i} with ffmpeg...', args.verbose)
         output_path = os.path.splitext(i)[0] + '.lowfps'  # same filename but different extension
         # get current video fps
         cap = cv2.VideoCapture(i)
@@ -394,7 +404,7 @@ if __name__ == '__main__':
 
     # for each .lowfps video file
     for i in mp4s:
-        print(f'Processing {i}...')
+        printIf(f'Processing {i}...', args.verbose)
         output_video = os.path.splitext(i)[0] + '_yolo.mp4'  # output filename
         # set up multithreading Queues
         # darknet_image_queue and fps_queue are limited to save memory (doesn't seem to affect performance)
@@ -435,7 +445,7 @@ if __name__ == '__main__':
         for group_name, groupid in zip(group_names, range(len(group_names))):
             # get bounding box coordinates of all detections from the current group
             bboxes = detectionsToArray(all_detections, groupid)
-            print(f'\t{bboxes.shape[0]} detections found for group {group_name}')
+            printIf(f'\t{bboxes.shape[0]} detections found for group {group_name}', args.verbose)
             # if there are no detections for current group, skip
             if bboxes.shape[0] == 0:
                 continue
@@ -452,14 +462,14 @@ if __name__ == '__main__':
                     continue
                 # get points of the current cluster
                 cluster_points = bboxes[clusters.labels_ == id, 0:2]
-                print(f'\t\t{len(cluster_points)} cluster points found in cluster {id}')
+                printIf(f'\t\t{len(cluster_points)} cluster points found in cluster {id}', args.verbose)
                 # calculate standard deviations of the coordinates
                 std_x = np.std(cluster_points[:, 0])
                 std_y = np.std(cluster_points[:, 1])
                 std_xy = math.sqrt(std_x**2 + std_y**2)
-                print(f'\t\t\tstdx: {std_x}, stdy: {std_y}, std: {std_xy}')
+                printIf(f'\t\t\tstdx: {std_x}, stdy: {std_y}, std: {std_xy}', args.verbose)
                 if std_xy >= std_thresh:
-                    print(f'\t\t!!Detected a moving object of type {group_name}!!')
+                    printIf(f'\t\t!!Detected a moving object of type {group_name}!!', args.verbose)
                     group_motion[groupid] = True
 
         # tmp = os.path.splitext(i)[0] + '_detect.txt'
@@ -468,7 +478,7 @@ if __name__ == '__main__':
         #         for k in j:
         #             file.write(f'{k}\n')
 
-        print(f'\tfinished {i} in {round(time.time() - t_start,1)}s')
+        printIf(f'\tfinished {i} in {round(time.time() - t_start,1)}s', args.verbose)
         # after darknet is done detecting objects, add file path to detected_name so it doesn't get converted again
         with open(detected_name, 'a') as file:
             file.write(f'{i}\n')
