@@ -31,12 +31,13 @@ def findFiles(dir, ext, exclude=None):
                 path_name = os.path.join(path, name)
                 # check if file is in exclude list
                 do_exclude = False
-                for i in exclude:
-                    if i == path_name:  # if file is in exclude list, skip
-                        do_exclude = True
-                        break
-                if do_exclude:
-                    continue
+                if exclude != None:
+                    for i in exclude:
+                        if i == path_name:  # if file is in exclude list, skip
+                            do_exclude = True
+                            break
+                    if do_exclude:
+                        continue
                 found.append(path_name)
     return found
 
@@ -73,13 +74,14 @@ def resumePid(pids):
 
 # read a text file an add each list to a list
 # txt = name of text file: "path\to\file.txt"
+# encoding = encoding type: "utf8" by defualt
 # returns empty txt_list if file does not exist
-def readList(txt):
+def readList(txt, encoding="utf8"):
     txt_list = []
     # read txt file if it exists
     if os.path.isfile(txt):
         # read working file
-        with open(txt, 'r') as file:
+        with open(txt, 'r', encoding=encoding) as file:
             lines = file.readlines()
             txt_list = ([line.rstrip() for line in lines])
     return txt_list
@@ -120,8 +122,8 @@ def getOOI(txt):
 
 
 # write python list to file:
-# file: file object
-# list: python list object
+# file = file object
+# list = python list object
 def writeList(file, list):
     for i in list:
         file.write(f'{i}\n')
@@ -129,7 +131,9 @@ def writeList(file, list):
 
 
 # separate detections by group ID number
-# detections
+# detections = list of lists in the format [[object name, confidence, bounding box, groupid]]
+#             where bounding box is a tuple: (x, y, width, height)
+# groupid = integer
 def detectionsToArray(detections, groupid):
     # get all indices where the groupID matches
     group_idx = [idx for idx in range(len(detections)) if detections[idx][3] == groupid]
@@ -149,6 +153,20 @@ def detectionsToArray(detections, groupid):
 def printIf(msg, arg):
     if arg:
         print(msg)
+    return
+
+# remove matching line from file
+# filename = path to text file: "path\to\file.txt"
+# match = string to match to a line
+def removeLine(filename, match):
+    # get all lines from file
+    lines = readList(filename)
+    # write all lines back to file except when line == match
+    with open(filename, 'w') as file:
+        for line in lines:
+            if line == match:
+                continue
+            file.write(f'{line}\n')
     return
 
 
@@ -277,12 +295,13 @@ def drawing(frame_queue, detections_queue, fps_queue, bsize, fscale, fsize):
 if __name__ == '__main__':
     # text files
     converted_name = 'converted.txt'  # text file that contains paths of video files that have been run through ffmpeg
-    detected_name = 'detected.txt'  # text file that contains paths of video files that have been run through the detector
     ffmpeg_err_name = 'ffmpeg_errors.txt'  # text file that contains any errors encountered by ffmpeg
     OOI_name = 'objects_of_interest.txt'  # text file containing groups of names of objects of interest
     # ffmpeg options
     ext = '.mp4'  # extension of video files
     fps = 10  # framerate that video files should be reduced to
+    output_crf = 45  # constant rate factor of output video
+    output_width = 600  # width of output video in pixels (height is calculated based on width)
     # darket options (file paths can be relative to darknet executable)
     darknet_thresh = 0.55  # threshold for darknet detector
     configPath = "./cfg/yolov4.cfg"  # Path to cfg
@@ -379,11 +398,8 @@ if __name__ == '__main__':
                     except:
                         warn(f'Could not delete {i}. Check file permissions')
 
-    # get list of .lowfps files that have been converted already
-    mp4s_detected = readList(detected_name)
-
-    # find all .lowfps files excluding the ones in mp4s_detected
-    mp4s = findFiles(args.input, '.lowfps', mp4s_detected)
+    # find all .lowfps files (they are encoded as h264 mp4 files, just with a different extension
+    mp4s = findFiles(args.input, '.lowfps')
 
     # if no files need to be processed by darknet, stop here before loading all the darknet stuff
     if len(mp4s) == 0:
@@ -447,12 +463,6 @@ if __name__ == '__main__':
         # Wait for all threads to finish
         for j in threads:
             j.join()
-        # delete .lowfps file after detection is complete
-        if Path(i).exists():  # check that the file still exists
-            try:
-                os.remove(i)
-            except:  # just send warning if delete fails instead of stopping the program
-                warn(f'Could not delete {i}. Check file permissions')
 
         # define array to keep track of motion in each object group
         group_motion = np.zeros(shape=(len(group_names), 1), dtype=bool)
@@ -496,9 +506,15 @@ if __name__ == '__main__':
                         file.write(f'{k}\n')
 
         printIf(f'\tfinished {i} in {round(time.time() - t_start,1)}s', args.verbose)
-        # after darknet is done detecting objects, add file path to detected_name so it doesn't get converted again
-        with open(detected_name, 'a') as file:
-            file.write(f'{i}\n')
+
+        # remove file.mp4 from converted list
+        removeLine(converted_name, os.path.splitext(i)[0] + '.mp4')
+        # delete .lowfps file after detection is complete
+        if Path(i).exists():  # check that the file still exists
+            try:
+                os.remove(i)
+            except:  # just send warning if delete fails instead of stopping the program
+                warn(f'Could not delete {i}. Check file permissions')
 
         # make new folders (if they don't already exist) in the video directory
         vid_folder = Path(os.path.dirname(i))
@@ -509,11 +525,30 @@ if __name__ == '__main__':
         if not false_path.exists() and args.save_false:
             os.mkdir(str(false_path))
 
-        # move .yolo file to the corresponding folder
+        # move _yolo.mp4 file to the corresponding folder (re-encoding with ffmpeg to save space)
+        output_path = ''
         if any(group_motion):
-            os.replace(output_video, str(true_path / os.path.basename(output_video)))
+            output_path = str(true_path / os.path.basename(output_video))
         elif args.save_false:
-            os.replace(output_video, str(false_path / os.path.basename(output_video)))
+            output_path = str(false_path / os.path.basename(output_video))
+        if len(output_path) > 0:
+            stream = ffmpeg.input(output_video).filter('scale', output_width, -1)\
+                .output(output_path, f='mp4', vcodec='h264_nvenc', crf=output_crf, gpu=args.gpu).overwrite_output()
+            try:
+                out, err = stream.run(capture_stdout=True, capture_stderr=True)
+                # if an error occurs, print error to console and ffmpeg_err_name file and continue with the next video
+            except ffmpeg.Error as e:
+                err = e.stderr.decode()
+                print(err, file=sys.stderr)
+                with open(ffmpeg_err_name, 'a') as file:
+                    sttime = datetime.datetime.fromtimestamp(time.time()).strftime('[%d_%m_%Y_%H:%M:%S]')  # create timestamp
+                    file.write(f'~~~~~~~~~~~~~~~~~~~~~~{sttime}~~~~~~~~~~~~~~~~~~~~~~\n{err}\n')
+            if Path(output_video).exists():  # check that the file still exists
+                # try to delete video file
+                try:
+                    os.remove(output_video)
+                except:
+                    warn(f'Could not delete {output_video}. Check file permissions')
 
     # resume suspended processes before exit
     resumePid(args.pid)

@@ -117,6 +117,5 @@ dmypy.json
 .pyre/
 
 #
-detected.txt
 converted.txt
 ffmpeg_errors.txt
