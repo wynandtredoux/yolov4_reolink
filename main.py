@@ -377,7 +377,7 @@ if __name__ == '__main__':
                     try:
                         os.remove(i)
                     except:
-                        raise Exception(f'Could not delete {i}. Check file permissions')
+                        warn(f'Could not delete {i}. Check file permissions')
 
     # get list of .lowfps files that have been converted already
     mp4s_detected = readList(detected_name)
