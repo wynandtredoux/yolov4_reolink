@@ -295,7 +295,6 @@ if __name__ == '__main__':
     # if the 2D (x,y) standard deviation of the points of a detected object
     # is greater than or equal to std_thresh, the object is considered moving
     std_thresh = 60
-
     # bounding box and text size
     box_thickness = 5
     font_size = 2
@@ -314,6 +313,12 @@ if __name__ == '__main__':
                              'This may require elevated privileges.')
     parser.add_argument('-v', '--verbose', action='store_true',
                         help='outputs more information to the console during processing')
+    parser.add_argument('-s', '--save_false', action='store_true',
+                        help='save videos detected as false positives')
+    parser.add_argument('-r', '--remove', action='store_true',
+                        help='delete original video files when processing is done')
+    parser.add_argument('-o', '--output_detections', action='store_true',
+                        help='output bounding box coordinates of detections in a text file in the video directory')
     args = parser.parse_args()
 
     # print args
@@ -366,6 +371,13 @@ if __name__ == '__main__':
             # after ffmpeg is done re-encoding the file (or failed), add file path to converted_name so it doesn't get converted again
             with open(converted_name, 'a') as file:
                 file.write(f'{i}\n')
+            # delete original file if flag is set
+            if args.remove:
+                if Path(i).exists():  # check that the file still exists
+                    try:
+                        os.remove(i)
+                    except:
+                        raise Exception(f'Could not delete {i}. Check file permissions')
 
     # get list of .lowfps files that have been converted already
     mp4s_detected = readList(detected_name)
@@ -390,9 +402,6 @@ if __name__ == '__main__':
         os.add_dll_directory(str(Path(os.getenv('CUDA_PATH')) / 'bin'))
     import darknet
     darknet.set_gpu(args.gpu)  # specify which GPU darknet should use
-
-    # darknet
-
 
     # navigate to darknet directory (darknet's default configuration uses paths relative to the executable)
     pwd = os.getcwd()
@@ -438,6 +447,12 @@ if __name__ == '__main__':
         # Wait for all threads to finish
         for j in threads:
             j.join()
+        # delete .lowfps file after detection is complete
+        if Path(i).exists(): # check that the file still exists
+            try:
+                os.remove(i)
+            except:
+                raise Exception(f'Could not delete {i}. Check file permissions')
 
         # define array to keep track of motion in each object group
         group_motion = np.zeros(shape=(len(group_names), 1), dtype=bool)
@@ -472,11 +487,13 @@ if __name__ == '__main__':
                     printIf(f'\t\t!!Detected a moving object of type {group_name}!!', args.verbose)
                     group_motion[groupid] = True
 
-        # tmp = os.path.splitext(i)[0] + '_detect.txt'
-        # with open(tmp, 'w') as file:
-        #     for j in all_detections:
-        #         for k in j:
-        #             file.write(f'{k}\n')
+        # write detections to text file if flag is set
+        if args.output_detections:
+            detect_file = os.path.splitext(i)[0] + '_detect.txt'
+            with open(detect_file, 'w') as file:
+                for j in all_detections:
+                    for k in j:
+                        file.write(f'{k}\n')
 
         printIf(f'\tfinished {i} in {round(time.time() - t_start,1)}s', args.verbose)
         # after darknet is done detecting objects, add file path to detected_name so it doesn't get converted again
@@ -489,13 +506,13 @@ if __name__ == '__main__':
         false_path = Path(vid_folder) / 'false_positive'
         if not true_path.exists():
             os.mkdir(str(true_path))
-        if not false_path.exists():
+        if not false_path.exists() and args.save_false:
             os.mkdir(str(false_path))
 
         # move .yolo file to the corresponding folder
         if any(group_motion):
             os.replace(output_video, str(true_path / os.path.basename(output_video)))
-        else:
+        elif args.save_false:
             os.replace(output_video, str(false_path / os.path.basename(output_video)))
 
     # resume suspended processes before exit
